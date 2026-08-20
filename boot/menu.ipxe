@@ -1,0 +1,25 @@
+#!ipxe
+
+set base-url http://192.0.2.10/pxe
+
+:menu
+menu Network Deployment Lab
+item winpe Windows PE deployment environment
+item shell iPXE shell
+item reboot Reboot
+choose target && goto ${target}
+
+:winpe
+kernel ${base-url}/wimboot
+initrd ${base-url}/winpe/BCD BCD
+initrd ${base-url}/winpe/boot.sdi boot.sdi
+initrd ${base-url}/winpe/boot.wim boot.wim
+boot
+
+:shell
+shell
+
+goto menu
+
+:reboot
+reboot
