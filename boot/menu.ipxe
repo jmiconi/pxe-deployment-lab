@@ -1,6 +1,6 @@
 #!ipxe
 
-set base-url http://192.0.2.10/pxe
+set base-url http://${next-server}/pxe
 
 :menu
 menu Network Deployment Lab
@@ -18,7 +18,6 @@ boot
 
 :shell
 shell
-
 goto menu
 
 :reboot
