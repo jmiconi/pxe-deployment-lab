@@ -12,12 +12,13 @@ Server-side components observed during the run:
 - ISC DHCP Server 4.4.3-P1
 - iPXE package 1.21.1+git-20220113.fbbdc3926
 - wimboot 2.9.0
+- Samba installed for the Windows image source
 
 The validation used an isolated VMware standard switch with no physical uplink. The PXE server had a dedicated lab interface and the test client was attached only to that isolated network, preventing interaction with production DHCP or PXE services.
 
-## Validated flow
+## Final validated flow
 
-The following chain was tested end-to-end:
+The following chain was tested end-to-end through first Windows startup:
 
 ```text
 UEFI client
@@ -29,7 +30,14 @@ UEFI client
   -> HTTP menu.ipxe
   -> wimboot
   -> BCD + boot.sdi + boot.wim
-  -> Windows PE / Windows Setup
+  -> Windows PE
+  -> WinPE network initialization
+  -> SMB read-only install.wim
+  -> GPT disk partitioning
+  -> DISM /Apply-Image
+  -> bcdboot UEFI files
+  -> local-disk boot
+  -> Windows 11 Pro OOBE
 ```
 
 ## Server bootstrap findings
@@ -37,7 +45,7 @@ UEFI client
 A clean Ubuntu 24.04.4 host did not include nginx, TFTP or iPXE by default. The following packages were installed during validation:
 
 ```bash
-sudo apt install -y nginx tftpd-hpa ipxe ipxe-qemu tftp-hpa isc-dhcp-server
+sudo apt install -y nginx tftpd-hpa ipxe ipxe-qemu tftp-hpa isc-dhcp-server samba
 ```
 
 Ubuntu provided the iPXE bootstrap binaries at:
@@ -134,21 +142,68 @@ wpeutil InitializeNetwork
 
 initialized networking successfully; `ipconfig` then returned the DHCP configuration and the PXE server became reachable by ping. No virtual-NIC change or driver injection was required for this validation.
 
-## Current scope
+## Windows image source validation
+
+The Windows installation source was a Windows 11 `install.wim` containing Windows 11 Pro at index 6.
+
+The image was stored outside the repository and exposed to WinPE using a read-only SMB share. From WinPE:
+
+```text
+net use Z: \\<pxe-server>\windows
+dir Z:\sources
+```
+
+completed successfully and exposed the multi-gigabyte `install.wim` without copying the image into WinPE memory.
+
+## Disk and image deployment validation
+
+The test VM contained a single disposable 60 GB GPT disk. The target disk was identified before destructive operations.
+
+A clean UEFI layout was created with:
+
+```text
+EFI System Partition   260 MB FAT32
+Microsoft Reserved     16 MB
+Windows                 remaining NTFS space
+```
+
+Windows 11 Pro was then applied using WIM index 6:
+
+```text
+dism /Apply-Image /ImageFile:Z:\sources\install.wim /Index:6 /ApplyDir:W:\
+```
+
+The UEFI boot files were created with:
+
+```text
+bcdboot W:\Windows /s S: /f UEFI
+```
+
+The VM rebooted from its local disk, displayed the Windows preparation phase and successfully reached Windows 11 OOBE (country/region selection).
+
+## Final status
 
 ### PASS
 
-The network-boot portion is validated end-to-end through Windows PE:
+The full tested workflow completed successfully:
 
 ```text
-UEFI -> DHCP -> TFTP -> iPXE -> HTTP -> wimboot -> WinPE
+UEFI
+-> DHCP
+-> TFTP
+-> iPXE
+-> HTTP
+-> wimboot
+-> WinPE
+-> SMB
+-> GPT partitioning
+-> DISM image application
+-> bcdboot
+-> local Windows boot
+-> Windows 11 Pro OOBE
 ```
 
-### In progress
-
-Full operating-system deployment is the next stage. A Windows 11 ISO containing Windows 11 Pro at WIM index 6 was selected for the lab. The installation image is being exposed to WinPE so that disk partitioning, `DISM /Apply-Image` and `bcdboot` can be validated.
-
-The repository must not claim full Windows installation automation until that stage has completed successfully.
+This validation proves the manual deployment path. It does **not** yet claim unattended zero-touch deployment; automation of the WinPE disk/image commands remains a future iteration.
 
 ## Revalidation policy
 
@@ -160,4 +215,8 @@ Clean-lab revalidation should be performed after changes affecting:
 - iPXE menu syntax
 - wimboot or WinPE boot assets
 - WinPE network initialization
-- unattended disk/image deployment logic
+- SMB image delivery
+- disk partitioning logic
+- DISM image-selection logic
+- UEFI bootloader creation
+- unattended deployment automation
